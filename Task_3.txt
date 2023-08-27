@@ -1,0 +1,257 @@
+Первый запрос:
+WITH events_cte AS ( 
+    SELECT date, SUM(CASE WHEN type = "start" THEN 1 ELSE -1 END) AS change1
+    FROM events 
+    GROUP BY date 
+), 
+cumulative_cte AS ( 
+    SELECT date, SUM(change1) OVER (ORDER BY date) AS cumulative 
+    FROM events_cte 
+), 
+max_cte AS ( 
+    SELECT MAX(cumulative) AS max_cumulative 
+    FROM cumulative_cte 
+), 
+start_cte AS ( 
+    SELECT MIN(date) AS start_date 
+    FROM cumulative_cte 
+    WHERE cumulative = (SELECT max_cumulative FROM max_cte) 
+), 
+end_cte AS ( 
+    SELECT MIN(date) AS end_date 
+    FROM cumulative_cte 
+    WHERE date > (SELECT start_date FROM start_cte) 
+) 
+SELECT start_date AS start, end_date AS end, max_cumulative AS count 
+FROM start_cte, end_cte, max_cte;
+
+Второй запрос отличается от первого только изменением MIN на MAX в start_cte:
+WITH events_cte AS ( 
+    SELECT date, SUM(CASE WHEN type = "start" THEN 1 ELSE -1 END) AS change1
+    FROM events 
+    GROUP BY date 
+), 
+cumulative_cte AS ( 
+    SELECT date, SUM(change1) OVER (ORDER BY date) AS cumulative 
+    FROM events_cte 
+), 
+max_cte AS ( 
+    SELECT MAX(cumulative) AS max_cumulative 
+    FROM cumulative_cte 
+), 
+start_cte AS ( 
+    SELECT MAX(date) AS start_date 
+    FROM cumulative_cte 
+    WHERE cumulative = (SELECT max_cumulative FROM max_cte) 
+), 
+end_cte AS ( 
+    SELECT MIN(date) AS end_date 
+    FROM cumulative_cte 
+    WHERE date > (SELECT start_date FROM start_cte) 
+) 
+SELECT start_date AS start, end_date AS end, max_cumulative AS count 
+FROM start_cte, end_cte, max_cte;
+
+
+Третий запрос скорее всего можно оптимизировать, но я узнал что такое CTE примерно вчера, пока навыка не хватает:
+
+WITH events_cte AS ( 
+    SELECT date, SUM(CASE WHEN type = "start" THEN 1 ELSE -1 END) AS change1
+    FROM events 
+    GROUP BY date 
+), 
+cumulative_cte AS ( 
+    SELECT date, SUM(change1) OVER (ORDER BY date) AS cumulative 
+    FROM events_cte 
+), 
+max_cte AS ( 
+    SELECT MAX(cumulative) AS max_cumulative 
+    FROM cumulative_cte 
+), 
+start_cte AS ( 
+    SELECT MIN(date) AS start_date 
+    FROM cumulative_cte 
+    WHERE cumulative = (SELECT max_cumulative FROM max_cte) 
+), 
+end_cte AS ( 
+    SELECT MIN(date) AS end_date 
+    FROM cumulative_cte 
+    WHERE date > (SELECT start_date FROM start_cte) 
+),
+start_cte_last AS ( 
+    SELECT MAX(date) AS start_date_last 
+    FROM cumulative_cte 
+    WHERE cumulative = (SELECT max_cumulative FROM max_cte) 
+), 
+end_cte_last AS ( 
+    SELECT MIN(date) AS end_date_last 
+    FROM cumulative_cte 
+    WHERE date > (SELECT start_date_last FROM start_cte_last) 
+), 
+res_cte_first AS (
+	SELECT 
+		start_date AS "start", 
+        end_date AS "end",
+        max_cumulative AS "count"
+        FROM start_cte, end_cte, max_cte
+),
+res_cte_last AS (
+	SELECT 
+		start_date_last AS "start", 
+        end_date_last AS "end",
+        max_cumulative AS "count"
+        FROM start_cte_last, end_cte_last, max_cte
+)
+
+SELECT start, end
+FROM res_cte_first
+UNION
+SELECT start, end
+FROM res_cte_last
+
+
+
+
+Далее мои комментарии, которые я записывал пока разбирался как работает то, что я нагуглил.
+
+REQUEST: [events_cte]
+    SELECT date, SUM(CASE WHEN type = "start" THEN 1 ELSE -1 END) AS change1
+    FROM events 
+    GROUP BY date 
+RETURNS:
+'2021-01-01 00:00:00', '1'
+'2021-01-01 02:00:00', '1'
+'2021-01-01 03:00:00', '1'
+'2021-01-01 06:00:00', '-1'
+'2021-01-01 07:00:00', '-1'
+'2021-01-01 08:00:00', '1'
+'2021-01-01 08:30:00', '-1'
+'2021-01-01 08:45:00', '1'
+'2021-01-01 09:00:00', '-1'
+'2021-01-01 10:00:00', '1'
+'2021-01-01 11:00:00', '1'
+'2021-01-01 12:00:00', '-1'
+'2021-01-01 13:00:00', '-1'
+'2021-01-01 14:00:00', '1'
+'2021-01-01 15:00:00', '-1'
+'2021-01-01 16:00:00', '-1'
+'2021-01-01 15:30:00', '1'
+'2021-01-01 16:30:00', '1'
+'2021-01-01 17:00:00', '1'
+'2021-01-01 18:00:00', '-1'
+'2021-01-01 19:00:00', '-1'
+'2021-01-01 19:30:00', '1'
+'2021-01-01 19:45:00', '-1'
+'2021-01-01 19:59:00', '-1'
+
+Из первоначальной базы возвращает временную таблицу events_cte, такую, что для каждой записи с type "start" поле change1 вернет "1", а для type "end" вернет "-1";
+
+REQUEST: [cumulative_cte]
+	SELECT date, SUM(change1) OVER (ORDER BY date) AS cumulative 
+	FROM events_cte 
+RETURNS:
+	'2021-01-01 00:00:00', '1'
+	'2021-01-01 02:00:00', '2'
+	'2021-01-01 03:00:00', '3'
+	'2021-01-01 06:00:00', '2'
+	'2021-01-01 07:00:00', '1'
+	'2021-01-01 08:00:00', '2'
+	'2021-01-01 08:30:00', '1'
+	'2021-01-01 08:45:00', '2'
+	'2021-01-01 09:00:00', '1'
+	'2021-01-01 10:00:00', '2'
+	'2021-01-01 11:00:00', '3'
+	'2021-01-01 12:00:00', '2'
+	'2021-01-01 13:00:00', '1'
+	'2021-01-01 14:00:00', '2'
+	'2021-01-01 15:00:00', '1'
+	'2021-01-01 15:30:00', '2'
+	'2021-01-01 16:00:00', '1'
+	'2021-01-01 16:30:00', '2'
+	'2021-01-01 17:00:00', '3'
+	'2021-01-01 18:00:00', '2'
+	'2021-01-01 19:00:00', '1'
+	'2021-01-01 19:30:00', '2'
+	'2021-01-01 19:45:00', '1'
+	'2021-01-01 19:59:00', '0'
+
+Из временной таблицы events_cte делаем временную таблицу cumulative_cte, такую, что для каждой записи таблицы events_cte поле cumulative вернет количество процессов, длящихся на момент старта интервала.
+(технически, расчет производиться через SUM-OVER(ORDER BY), которая для каждой строки таблицы cumulative_cte возвращает сумму всех предыдущих значений поле change1 таблицы events_cte);
+
+
+REQUEST: [max_cte]
+	SELECT date, SUM(change1) OVER (ORDER BY date) AS cumulative 
+	FROM events_cte 
+RETURNS:
+	'3'
+
+Возвращает временную таблицу, содержащей максимальное значение cumulative из временной таблицы cumulative_cte
+
+
+REQUEST: [start_cte]
+    SELECT MIN(date) AS start_date 
+    FROM cumulative_cte 
+    WHERE cumulative = (SELECT max_cumulative FROM max_cte) 
+RETURNS:
+	'2021-01-01 03:00:00'
+
+Возвращает временную таблицу из временной таблицы cumulative_cte содержащую первую (минимальную) дату, для которой значение cumulative == max_cumulative. Проще говоря, возвращает первую дату у которой количество запущенных процессов равно максимальному.
+
+REQUEST: [start_cte]
+  	SELECT MIN(date) AS end_date 
+    FROM cumulative_cte 
+    WHERE date > (SELECT start_date FROM start_cte) 
+RETURNS:
+	'2021-01-01 06:00:00'
+
+Возвращает временную таблицу из временной таблицы cumulative_cte содержащую дату, следующую за датой у которой cumulative == max_cumulative.
+В рамках задачи можно использовать такой подход потому что каждая запись в таблице events (а значит и в cumulative_cte) означает начало или конец процесса, при этом, cumulative для нашей end-date не может быть больше cumulative start_date (иначе end-date был бы start-date), следовательно, значение cumulative для того end-date, которое находит наш запрос всегда будет меньше, чем у start_date и это не нужно дополнительно проверять.
+
+Остается только вывести результаты 
+
+SELECT start_date AS start, end_date AS end, max_cumulative AS count 
+FROM start_cte, end_cte, max_cte;
+
+Что бы вместо первого диапазона вернуть последний достаточно все лишь в start_cte поменять MIN(date) на MAX (date):
+
+start_cte AS ( 
+    SELECT MAX(date) AS start_date 
+    FROM cumulative_cte 
+    WHERE cumulative = (SELECT max_cumulative FROM max_cte) 
+), 
+
+остальные запросы остаются без изменения.
+
+Что бы вывести оба интервала нужно их найти. Как это сделать мы уже знаем. Завернем поиск интервалов в собственные CTE и выведем через SELECT UNION.
+Пришлось сделать еще 3 CTE что бы отдельно вывести первый и последний интервал. Скорее всего, метод не оптимальный и можно сократить количество кода. Но я пока не умею думать на SQL.
+
+start_cte_last AS ( 
+    SELECT MAX(date) AS start_date_last 
+    FROM cumulative_cte 
+    WHERE cumulative = (SELECT max_cumulative FROM max_cte) 
+), 
+end_cte_last AS ( 
+    SELECT MIN(date) AS end_date_last 
+    FROM cumulative_cte 
+    WHERE date > (SELECT start_date_last FROM start_cte_last) 
+), 
+res_cte_first AS (
+	SELECT 
+		start_date AS "start", 
+        end_date AS "end",
+        max_cumulative AS "count"
+        FROM start_cte, end_cte, max_cte
+),
+res_cte_last AS (
+	SELECT 
+		start_date_last AS "start", 
+        end_date_last AS "end",
+        max_cumulative AS "count"
+        FROM start_cte_last, end_cte_last, max_cte
+)
+
+SELECT start, end
+FROM res_cte_first
+UNION
+SELECT start, end
+FROM res_cte_last
