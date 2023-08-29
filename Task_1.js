@@ -1,20 +1,25 @@
-function getAllCombinations(arr, n) {
-    const sortedArr = arr.sort((a, b) => {return a - b})
-    const allCombinations = []
-    const singleCombination = []
-
-    for (let i = 0; i < sortedArr.length; i++) {
-        singleCombination.push(sortedArr[i])
-
-        const elemsSummInSingleCombination = singleCombination.reduce((a, b) => a + b);
-
-        if (elemsSummInSingleCombination === n) {
-            allCombinations.push([...singleCombination]);
-        } else if (elemsSummInSingleCombination > n) {
-            singleCombination.pop()
-            i = sortedArr.indexOf(singleCombination[singleCombination.length - 1])
-            singleCombination.pop()
+function sostavChisla(massivChisel, chilso) {
+    const allCombinations = [];
+    for (let i = 0; i < massivChisel.length; i++) {
+        if (massivChisel[i] === chilso) {
+            allCombinations.push([massivChisel[i]])
+            massivChisel.splice(i, 1)
+        } else if (massivChisel[i] > chilso) {
+            massivChisel.splice(i, 1)
         }
     }
-    return allCombinations
+
+    function backtrack(combination, index) {
+        if (combination.reduce((a, b) => a + b, 0) === chilso) {
+            allCombinations.push([...combination]);
+            return;
+        }
+        for (let i = index; i < massivChisel.length; i++) {
+            combination.push(massivChisel[i]);
+            backtrack(combination, i + 1);
+            combination.pop();
+        }
+    }
+    backtrack([], 0);
+    return allCombinations;
 }
